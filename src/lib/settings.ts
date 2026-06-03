@@ -21,7 +21,7 @@ export function applyTheme() {
 }
 
 export function getYouTubeApiKey(): string {
-  return localStorage.getItem('youtube_api_key') || '';
+  return localStorage.getItem('youtube_api_key') || 'AIzaSyDplH847sW3tgxD9ksMaRU_S4o1qKh_4GM';
 }
 
 export function setYouTubeApiKey(key: string) {
@@ -29,7 +29,7 @@ export function setYouTubeApiKey(key: string) {
 }
 
 export function getGeminiApiKey(): string {
-  return localStorage.getItem('gemini_api_key') || '';
+  return localStorage.getItem('gemini_api_key') || 'AIzaSyDplH847sW3tgxD9ksMaRU_S4o1qKh_4GM';
 }
 
 export function setGeminiApiKey(key: string) {
