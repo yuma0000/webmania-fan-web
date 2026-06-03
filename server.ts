@@ -13,7 +13,7 @@ async function startServer() {
   app.get('/api/youtube/channel/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const apiKey = process.env.YOUTUBE_API_KEY;
+      const apiKey = req.headers['x-youtube-key'] as string || process.env.YOUTUBE_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'YOUTUBE_API_KEY is missing' });
       }
@@ -34,14 +34,21 @@ async function startServer() {
   app.get('/api/youtube/search', async (req, res) => {
     try {
       const { channelId, q } = req.query;
-      const apiKey = process.env.YOUTUBE_API_KEY;
+      const apiKey = req.headers['x-youtube-key'] as string || process.env.YOUTUBE_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'YOUTUBE_API_KEY is missing' });
       }
 
-      let url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&order=date&key=${apiKey}`;
-      if (channelId) url += `&channelId=${channelId}`;
-      if (q) url += `&q=${encodeURIComponent(q as string)}`;
+      let url;
+      if (channelId && !q) {
+        // Use playlistItems to get latest videos (1 quota unit vs 100 for search)
+        const uploadsPlaylistId = (channelId as string).replace(/^UC/, 'UU');
+        url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=50&key=${apiKey}`;
+      } else {
+        url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&order=date&key=${apiKey}`;
+        if (channelId) url += `&channelId=${channelId}`;
+        if (q) url += `&q=${encodeURIComponent(q as string)}`;
+      }
 
       const response = await fetch(url);
       const data = await response.json();
@@ -50,7 +57,21 @@ async function startServer() {
         throw new Error(data.error.message);
       }
 
-      res.json(data.items || []);
+      // Format playlistItems identical to search results
+      const items = data.items?.map((item: any) => {
+        if (item.snippet.resourceId && item.snippet.resourceId.videoId) {
+          return {
+            ...item,
+            id: {
+              kind: 'youtube#video',
+              videoId: item.snippet.resourceId.videoId
+            }
+          };
+        }
+        return item;
+      }) || [];
+
+      res.json(items);
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: e.message || 'Failed to search videos' });
@@ -60,7 +81,7 @@ async function startServer() {
   app.post('/api/chat', async (req, res) => {
     try {
       const { message, history } = req.body;
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = req.headers['x-gemini-key'] as string || process.env.GEMINI_API_KEY;
       if (!apiKey) {
         return res.status(400).json({ error: 'GEMINI_API_KEY is missing' });
       }

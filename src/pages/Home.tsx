@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Settings, MessageSquareMore } from 'lucide-react';
 import { YouTubeChannel, YouTubeVideo } from '../types';
 
+import { getAuthHeaders } from '../lib/settings';
+
 export function Home() {
   const [channel, setChannel] = useState<YouTubeChannel | null>(null);
   const [videos, setVideos] = useState<YouTubeVideo[]>([]);
@@ -14,21 +16,69 @@ export function Home() {
   const channelId = 'UCvpDuJLRV07mTu6gh9CGq0w'; // Web Mania Target Channel
 
   const fetchData = async (query = '') => {
+    // キャッシュの確認（初期表示のみ）
+    if (!query) {
+      const cachedStr = sessionStorage.getItem('home_channel_data');
+      if (cachedStr) {
+        try {
+          const cached = JSON.parse(cachedStr);
+          if (Date.now() - cached.timestamp < 1000 * 60 * 60) { // 1時間有効
+             setChannel(cached.channel);
+             setVideos(cached.videos);
+             setLoading(false);
+             return;
+          }
+        } catch (e) {}
+      }
+    }
+
     setLoading(true);
     setError('');
     try {
-      if (!channel) {
-        const chanRes = await fetch(`/api/youtube/channel/${channelId}`);
-        if (!chanRes.ok) throw new Error(await chanRes.text());
-        setChannel(await chanRes.json());
+      let chanResData = channel;
+      if (!chanResData) {
+        const chanRes = await fetch(`/api/youtube/channel/${channelId}`, { headers: getAuthHeaders() });
+        if (!chanRes.ok) {
+           const errText = await chanRes.text();
+           throw new Error(errText);
+        }
+        chanResData = await chanRes.json();
+        setChannel(chanResData);
       }
 
       let searchUrl = `/api/youtube/search?channelId=${channelId}`;
       if (query) searchUrl += `&q=${encodeURIComponent(query)}`;
-      const vidRes = await fetch(searchUrl);
-      if (!vidRes.ok) throw new Error(await vidRes.text());
+      const vidRes = await fetch(searchUrl, { headers: getAuthHeaders() });
+      
+      if (!vidRes.ok) {
+        let errorText = 'データ取得に失敗しました';
+        try {
+          const errData = await vidRes.json();
+          errorText = errData.error || errData.message || errorText;
+        } catch(e) {
+          const rawText = await vidRes.text();
+          if (rawText) errorText = rawText;
+        }
+        
+        if (errorText.toLowerCase().includes('quota')) {
+           errorText = 'YouTube APIの1日の利用制限（リクエスト上限）に達しました。明日また検索をお試しください。';
+        }
+        throw new Error(errorText);
+      }
+      
       const vids = await vidRes.json();
-      setVideos(vids.filter((v: YouTubeVideo) => v.id.videoId)); 
+      const filteredVids = vids.filter((v: YouTubeVideo) => v.id?.videoId);
+      setVideos(filteredVids); 
+
+      // 初期表示ならキャッシュを保存
+      if (!query && chanResData) {
+        sessionStorage.setItem('home_channel_data', JSON.stringify({
+          channel: chanResData,
+          videos: filteredVids,
+          timestamp: Date.now()
+        }));
+      }
+
     } catch (err: any) {
       setError(err.message || 'データ取得に失敗しました');
     } finally {

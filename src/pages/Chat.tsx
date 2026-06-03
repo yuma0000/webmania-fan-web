@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Send } from 'lucide-react';
 import { ChatMessage } from '../types';
+import { getAuthHeaders } from '../lib/settings';
 
 export function Chat() {
   const navigate = useNavigate();
@@ -36,6 +37,7 @@ export function Chat() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...getAuthHeaders()
         },
         body: JSON.stringify({
           message: userText + (videoTitle ? `\n(Context - currently watching: ${videoTitle})` : ''),
