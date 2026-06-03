@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Send } from 'lucide-react';
 import { ChatMessage } from '../types';
-import { getAuthHeaders } from '../lib/settings';
+import { getGeminiApiKey } from '../lib/settings';
 
 export function Chat() {
   const navigate = useNavigate();
@@ -33,22 +33,39 @@ export function Chat() {
     setHistory(updatedHistory);
 
     try {
-      const res = await fetch('/api/chat', {
+      const gemKey = getGeminiApiKey();
+      if (!gemKey) {
+        throw new Error('設定画面（右上の歯車アイコン）からGemini APIキーを登録してください。');
+      }
+
+      const contents = history.slice(-7).map((msg: any) => ({
+        role: msg.isUser ? 'user' : 'model',
+        parts: [{ text: msg.text }]
+      }));
+      contents.push({
+        role: 'user',
+        parts: [{ text: userText + (videoTitle ? `\n(Context - currently watching: ${videoTitle})` : '') }]
+      });
+
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${gemKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeaders()
         },
         body: JSON.stringify({
-          message: userText + (videoTitle ? `\n(Context - currently watching: ${videoTitle})` : ''),
-          history: history.slice(-7) // keep last 7
+          contents,
+          systemInstruction: {
+            parts: [{ text: 'You are a helpful assistant for the Web Mania Fan app answering questions about YouTube or app usage.' }]
+          }
         }),
       });
       
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error?.message || 'Failed to generate response');
 
-      setHistory([...updatedHistory, { text: data.reply, isUser: false }]);
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '返信を生成できませんでした。';
+
+      setHistory([...updatedHistory, { text: reply, isUser: false }]);
     } catch (err: any) {
       setHistory([...updatedHistory, { text: `エラーが発生しました: ${err.message}`, isUser: false }]);
     } finally {

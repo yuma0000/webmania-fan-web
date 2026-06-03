@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, Settings, MessageSquareMore } from 'lucide-react';
 import { YouTubeChannel, YouTubeVideo } from '../types';
 
-import { getAuthHeaders } from '../lib/settings';
+import { getYouTubeApiKey } from '../lib/settings';
 
 export function Home() {
   const [channel, setChannel] = useState<YouTubeChannel | null>(null);
@@ -35,20 +35,37 @@ export function Home() {
     setLoading(true);
     setError('');
     try {
+      const ytKey = getYouTubeApiKey();
+      if (!ytKey) {
+        throw new Error('設定画面（右上の歯車アイコン）からYouTube APIキーを登録してください。');
+      }
+
       let chanResData = channel;
       if (!chanResData) {
-        const chanRes = await fetch(`/api/youtube/channel/${channelId}`, { headers: getAuthHeaders() });
+        const chanRes = await fetch(`https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelId}&key=${ytKey}`);
         if (!chanRes.ok) {
            const errText = await chanRes.text();
            throw new Error(errText);
         }
-        chanResData = await chanRes.json();
-        setChannel(chanResData);
+        const chanData = await chanRes.json();
+        if (chanData.items && chanData.items.length > 0) {
+           chanResData = chanData.items[0];
+           setChannel(chanResData);
+        } else {
+           throw new Error('チャンネルが見つかりませんでした');
+        }
       }
 
-      let searchUrl = `/api/youtube/search?channelId=${channelId}`;
-      if (query) searchUrl += `&q=${encodeURIComponent(query)}`;
-      const vidRes = await fetch(searchUrl, { headers: getAuthHeaders() });
+      let searchUrl = '';
+      if (channelId && !query) {
+        const uploadsPlaylistId = channelId.replace(/^UC/, 'UU');
+        searchUrl = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=50&key=${ytKey}`;
+      } else {
+        searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=50&order=date&key=${ytKey}&channelId=${channelId}`;
+        if (query) searchUrl += `&q=${encodeURIComponent(query)}`;
+      }
+
+      const vidRes = await fetch(searchUrl);
       
       if (!vidRes.ok) {
         let errorText = 'データ取得に失敗しました';
@@ -66,8 +83,22 @@ export function Home() {
         throw new Error(errorText);
       }
       
-      const vids = await vidRes.json();
-      const filteredVids = vids.filter((v: YouTubeVideo) => v.id?.videoId);
+      const vidData = await vidRes.json();
+      
+      const items = vidData.items?.map((item: any) => {
+        if (item.snippet.resourceId && item.snippet.resourceId.videoId) {
+          return {
+            ...item,
+            id: {
+              kind: 'youtube#video',
+              videoId: item.snippet.resourceId.videoId
+            }
+          };
+        }
+        return item;
+      }) || [];
+
+      const filteredVids = items.filter((v: any) => v.id?.videoId);
       setVideos(filteredVids); 
 
       // 初期表示ならキャッシュを保存
